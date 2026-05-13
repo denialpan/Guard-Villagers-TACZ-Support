@@ -51,7 +51,9 @@ public class TaczGunAttackGoal extends Goal {
     private boolean stagedGuardInventoryRound;
     private boolean yieldToDefaultNoAmmoBehavior;
     private BlockPos ammoSourcePos;
+    private BlockPos cachedAmmoContainerPos;
     private BlockPos foodSourcePos;
+    private BlockPos cachedFoodContainerPos;
     private int repositionAttemptOffset;
 
     public TaczGunAttackGoal(Guard guard) {
@@ -125,11 +127,25 @@ public class TaczGunAttackGoal extends Goal {
 
         if (this.shouldSeekFoodBeforeAmmo(gunStack)) {
             IGunOperator.fromLivingEntity(this.guard).aim(false);
+            if (this.cachedFoodContainerPos != null && this.isCachedFoodContainerUsable()) {
+                this.foodSourcePos = this.cachedFoodContainerPos;
+            } else if (this.cachedFoodContainerPos != null) {
+                this.cachedFoodContainerPos = null;
+                this.foodSearchCooldown = 0;
+            }
+
+            if (this.foodSourcePos != null) {
+                this.tickFoodResupply();
+                return;
+            }
+
             if (this.foodSearchCooldown > 0) {
                 --this.foodSearchCooldown;
             } else {
                 this.foodSourcePos = this.findNearestVanillaFoodContainer();
-                if (this.foodSourcePos == null) {
+                if (this.foodSourcePos != null) {
+                    this.cachedFoodContainerPos = this.foodSourcePos;
+                } else {
                     this.foodSearchCooldown = FOOD_SEARCH_COOLDOWN_TICKS;
                 }
             }
@@ -366,12 +382,26 @@ public class TaczGunAttackGoal extends Goal {
     }
 
     private void tryStartAmmoResupply(ItemStack gunStack) {
+        if (this.cachedAmmoContainerPos != null) {
+            if (this.isCachedAmmoContainerUsable(gunStack)) {
+                this.ammoSourcePos = this.cachedAmmoContainerPos;
+                return;
+            }
+
+            this.cachedAmmoContainerPos = null;
+            this.ammoSearchCooldown = 0;
+        }
+
         if (this.ammoSearchCooldown > 0) {
             --this.ammoSearchCooldown;
             return;
         }
 
         this.ammoSourcePos = this.findNearestVanillaAmmoContainer(gunStack);
+        if (this.ammoSourcePos != null) {
+            this.cachedAmmoContainerPos = this.ammoSourcePos;
+        }
+
         if (this.ammoSourcePos == null) {
             this.ammoSearchCooldown = AMMO_SEARCH_COOLDOWN_TICKS;
         }
@@ -418,6 +448,17 @@ public class TaczGunAttackGoal extends Goal {
         return nearest;
     }
 
+    private boolean isCachedFoodContainerUsable() {
+        if (this.cachedFoodContainerPos.distSqr(this.guard.blockPosition()) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+            return false;
+        }
+
+        BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedFoodContainerPos);
+        return blockEntity instanceof Container container
+                && this.isVanillaBlockEntity(blockEntity)
+                && this.containerHasFood(container);
+    }
+
     private boolean containerHasFood(Container container) {
         for (int slot = 0; slot < container.getContainerSize(); ++slot) {
             if (this.isFood(container.getItem(slot))) {
@@ -433,6 +474,9 @@ public class TaczGunAttackGoal extends Goal {
         if (!(blockEntity instanceof Container container)
                 || !this.isVanillaBlockEntity(blockEntity)
                 || !this.containerHasFood(container)) {
+            if (this.foodSourcePos.equals(this.cachedFoodContainerPos)) {
+                this.cachedFoodContainerPos = null;
+            }
             this.foodSourcePos = null;
             return;
         }
@@ -444,6 +488,11 @@ public class TaczGunAttackGoal extends Goal {
 
         this.guard.getNavigation().stop();
         this.consumeOneFoodFromContainer(container);
+        if (this.containerHasFood(container)) {
+            this.cachedFoodContainerPos = this.foodSourcePos;
+        } else if (this.foodSourcePos.equals(this.cachedFoodContainerPos)) {
+            this.cachedFoodContainerPos = null;
+        }
         this.foodSourcePos = null;
     }
 
@@ -502,6 +551,17 @@ public class TaczGunAttackGoal extends Goal {
         return nearest;
     }
 
+    private boolean isCachedAmmoContainerUsable(ItemStack gunStack) {
+        if (this.cachedAmmoContainerPos.distSqr(this.guard.blockPosition()) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+            return false;
+        }
+
+        BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedAmmoContainerPos);
+        return blockEntity instanceof Container container
+                && this.isVanillaBlockEntity(blockEntity)
+                && this.containerHasCompatibleAmmo(container, gunStack);
+    }
+
     private boolean isVanillaBlockEntity(BlockEntity blockEntity) {
         ResourceLocation id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
         return id != null && "minecraft".equals(id.getNamespace());
@@ -534,6 +594,9 @@ public class TaczGunAttackGoal extends Goal {
         if (!(blockEntity instanceof Container container)
                 || !this.isVanillaBlockEntity(blockEntity)
                 || !this.containerHasCompatibleAmmo(container, gunStack)) {
+            if (this.ammoSourcePos.equals(this.cachedAmmoContainerPos)) {
+                this.cachedAmmoContainerPos = null;
+            }
             this.ammoSourcePos = null;
             return;
         }
@@ -545,6 +608,11 @@ public class TaczGunAttackGoal extends Goal {
 
         this.guard.getNavigation().stop();
         this.extractMaxCompatibleAmmo(container, gunStack);
+        if (this.containerHasCompatibleAmmo(container, gunStack)) {
+            this.cachedAmmoContainerPos = this.ammoSourcePos;
+        } else if (this.ammoSourcePos.equals(this.cachedAmmoContainerPos)) {
+            this.cachedAmmoContainerPos = null;
+        }
         this.ammoSourcePos = null;
     }
 
