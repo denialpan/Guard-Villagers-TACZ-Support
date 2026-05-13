@@ -34,6 +34,8 @@ public class TaczGunAttackGoal extends Goal {
     private static final int AMMO_SEARCH_RADIUS = 64;
     private static final int AMMO_SEARCH_COOLDOWN_TICKS = 100;
     private static final int FOOD_SEARCH_COOLDOWN_TICKS = 100;
+    private static final int CONTAINER_REACH_TIMEOUT_TICKS = 400;
+    private static final int TIMED_OUT_CONTAINER_SKIP_TICKS = 400;
     private static final int GUARD_OFFHAND_INVENTORY_SLOT = 4;
     private static final float LOW_HEALTH_FOOD_THRESHOLD = 19.0F;
     private static final double AMMO_CONTAINER_REACH_SQR = 4.0D;
@@ -48,12 +50,18 @@ public class TaczGunAttackGoal extends Goal {
     private int attackTime;
     private int ammoSearchCooldown;
     private int foodSearchCooldown;
+    private int ammoSourceTravelTicks;
+    private int foodSourceTravelTicks;
+    private int timedOutAmmoContainerSkipTicks;
+    private int timedOutFoodContainerSkipTicks;
     private boolean stagedGuardInventoryRound;
     private boolean yieldToDefaultNoAmmoBehavior;
     private BlockPos ammoSourcePos;
     private BlockPos cachedAmmoContainerPos;
     private BlockPos foodSourcePos;
     private BlockPos cachedFoodContainerPos;
+    private BlockPos timedOutAmmoContainerPos;
+    private BlockPos timedOutFoodContainerPos;
     private int repositionAttemptOffset;
 
     public TaczGunAttackGoal(Guard guard) {
@@ -111,6 +119,8 @@ public class TaczGunAttackGoal extends Goal {
         this.attackTime = 0;
         this.ammoSourcePos = null;
         this.foodSourcePos = null;
+        this.ammoSourceTravelTicks = 0;
+        this.foodSourceTravelTicks = 0;
         this.foodSearchCooldown = 0;
         this.stagedGuardInventoryRound = false;
         IGunOperator.fromLivingEntity(this.guard).aim(false);
@@ -118,6 +128,7 @@ public class TaczGunAttackGoal extends Goal {
 
     @Override
     public void tick() {
+        this.tickTimedOutContainerSkips();
         ItemStack gunStack = this.guard.getMainHandItem();
         if (this.foodSourcePos != null) {
             IGunOperator.fromLivingEntity(this.guard).aim(false);
@@ -129,6 +140,7 @@ public class TaczGunAttackGoal extends Goal {
             IGunOperator.fromLivingEntity(this.guard).aim(false);
             if (this.cachedFoodContainerPos != null && this.isCachedFoodContainerUsable()) {
                 this.foodSourcePos = this.cachedFoodContainerPos;
+                this.foodSourceTravelTicks = 0;
             } else if (this.cachedFoodContainerPos != null) {
                 this.cachedFoodContainerPos = null;
                 this.foodSearchCooldown = 0;
@@ -145,6 +157,7 @@ public class TaczGunAttackGoal extends Goal {
                 this.foodSourcePos = this.findNearestVanillaFoodContainer();
                 if (this.foodSourcePos != null) {
                     this.cachedFoodContainerPos = this.foodSourcePos;
+                    this.foodSourceTravelTicks = 0;
                 } else {
                     this.foodSearchCooldown = FOOD_SEARCH_COOLDOWN_TICKS;
                 }
@@ -385,6 +398,7 @@ public class TaczGunAttackGoal extends Goal {
         if (this.cachedAmmoContainerPos != null) {
             if (this.isCachedAmmoContainerUsable(gunStack)) {
                 this.ammoSourcePos = this.cachedAmmoContainerPos;
+                this.ammoSourceTravelTicks = 0;
                 return;
             }
 
@@ -400,6 +414,7 @@ public class TaczGunAttackGoal extends Goal {
         this.ammoSourcePos = this.findNearestVanillaAmmoContainer(gunStack);
         if (this.ammoSourcePos != null) {
             this.cachedAmmoContainerPos = this.ammoSourcePos;
+            this.ammoSourceTravelTicks = 0;
         }
 
         if (this.ammoSourcePos == null) {
@@ -438,6 +453,10 @@ public class TaczGunAttackGoal extends Goal {
                 continue;
             }
 
+            if (this.isTimedOutFoodContainer(pos)) {
+                continue;
+            }
+
             double distance = pos.distSqr(guardPos);
             if (distance < nearestDistance) {
                 nearestDistance = distance;
@@ -456,7 +475,8 @@ public class TaczGunAttackGoal extends Goal {
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedFoodContainerPos);
         return blockEntity instanceof Container container
                 && this.isVanillaBlockEntity(blockEntity)
-                && this.containerHasFood(container);
+                && this.containerHasFood(container)
+                && !this.isTimedOutFoodContainer(this.cachedFoodContainerPos);
     }
 
     private boolean containerHasFood(Container container) {
@@ -478,14 +498,21 @@ public class TaczGunAttackGoal extends Goal {
                 this.cachedFoodContainerPos = null;
             }
             this.foodSourcePos = null;
+            this.foodSourceTravelTicks = 0;
             return;
         }
 
         if (this.guard.distanceToSqr(this.foodSourcePos.getX() + 0.5D, this.foodSourcePos.getY() + 0.5D, this.foodSourcePos.getZ() + 0.5D) > AMMO_CONTAINER_REACH_SQR) {
+            if (++this.foodSourceTravelTicks >= CONTAINER_REACH_TIMEOUT_TICKS) {
+                this.markFoodContainerTimedOut(this.foodSourcePos);
+                return;
+            }
+
             this.guard.getNavigation().moveTo(this.foodSourcePos.getX() + 0.5D, this.foodSourcePos.getY(), this.foodSourcePos.getZ() + 0.5D, 0.8D);
             return;
         }
 
+        this.foodSourceTravelTicks = 0;
         this.guard.getNavigation().stop();
         this.consumeOneFoodFromContainer(container);
         if (this.containerHasFood(container)) {
@@ -541,6 +568,10 @@ public class TaczGunAttackGoal extends Goal {
                 continue;
             }
 
+            if (this.isTimedOutAmmoContainer(pos)) {
+                continue;
+            }
+
             double distance = pos.distSqr(guardPos);
             if (distance < nearestDistance) {
                 nearestDistance = distance;
@@ -559,7 +590,52 @@ public class TaczGunAttackGoal extends Goal {
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedAmmoContainerPos);
         return blockEntity instanceof Container container
                 && this.isVanillaBlockEntity(blockEntity)
-                && this.containerHasCompatibleAmmo(container, gunStack);
+                && this.containerHasCompatibleAmmo(container, gunStack)
+                && !this.isTimedOutAmmoContainer(this.cachedAmmoContainerPos);
+    }
+
+    private boolean isTimedOutAmmoContainer(BlockPos pos) {
+        return this.timedOutAmmoContainerSkipTicks > 0
+                && this.timedOutAmmoContainerPos != null
+                && this.timedOutAmmoContainerPos.equals(pos);
+    }
+
+    private boolean isTimedOutFoodContainer(BlockPos pos) {
+        return this.timedOutFoodContainerSkipTicks > 0
+                && this.timedOutFoodContainerPos != null
+                && this.timedOutFoodContainerPos.equals(pos);
+    }
+
+    private void markAmmoContainerTimedOut(BlockPos pos) {
+        this.timedOutAmmoContainerPos = pos.immutable();
+        this.timedOutAmmoContainerSkipTicks = TIMED_OUT_CONTAINER_SKIP_TICKS;
+        if (pos.equals(this.cachedAmmoContainerPos)) {
+            this.cachedAmmoContainerPos = null;
+        }
+        this.ammoSourcePos = null;
+        this.ammoSourceTravelTicks = 0;
+        this.ammoSearchCooldown = 0;
+    }
+
+    private void markFoodContainerTimedOut(BlockPos pos) {
+        this.timedOutFoodContainerPos = pos.immutable();
+        this.timedOutFoodContainerSkipTicks = TIMED_OUT_CONTAINER_SKIP_TICKS;
+        if (pos.equals(this.cachedFoodContainerPos)) {
+            this.cachedFoodContainerPos = null;
+        }
+        this.foodSourcePos = null;
+        this.foodSourceTravelTicks = 0;
+        this.foodSearchCooldown = 0;
+    }
+
+    private void tickTimedOutContainerSkips() {
+        if (this.timedOutAmmoContainerSkipTicks > 0 && --this.timedOutAmmoContainerSkipTicks == 0) {
+            this.timedOutAmmoContainerPos = null;
+        }
+
+        if (this.timedOutFoodContainerSkipTicks > 0 && --this.timedOutFoodContainerSkipTicks == 0) {
+            this.timedOutFoodContainerPos = null;
+        }
     }
 
     private boolean isVanillaBlockEntity(BlockEntity blockEntity) {
@@ -598,14 +674,22 @@ public class TaczGunAttackGoal extends Goal {
                 this.cachedAmmoContainerPos = null;
             }
             this.ammoSourcePos = null;
+            this.ammoSourceTravelTicks = 0;
             return;
         }
 
         if (this.guard.distanceToSqr(this.ammoSourcePos.getX() + 0.5D, this.ammoSourcePos.getY() + 0.5D, this.ammoSourcePos.getZ() + 0.5D) > AMMO_CONTAINER_REACH_SQR) {
+            if (++this.ammoSourceTravelTicks >= CONTAINER_REACH_TIMEOUT_TICKS) {
+                this.markAmmoContainerTimedOut(this.ammoSourcePos);
+                this.tryStartAmmoResupply(gunStack);
+                return;
+            }
+
             this.guard.getNavigation().moveTo(this.ammoSourcePos.getX() + 0.5D, this.ammoSourcePos.getY(), this.ammoSourcePos.getZ() + 0.5D, 0.8D);
             return;
         }
 
+        this.ammoSourceTravelTicks = 0;
         this.guard.getNavigation().stop();
         this.extractMaxCompatibleAmmo(container, gunStack);
         if (this.containerHasCompatibleAmmo(container, gunStack)) {
