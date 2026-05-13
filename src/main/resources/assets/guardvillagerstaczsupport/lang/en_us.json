@@ -1,0 +1,13 @@
+{
+  "itemGroup.guardvillagerstaczsupport": "Example Mod Tab",
+  "block.guardvillagerstaczsupport.example_block": "Example Block",
+  "item.guardvillagerstaczsupport.example_item": "Example Item",
+
+  "guardvillagerstaczsupport.configuration.title": "Guard Villagers TACZ Support Configs",
+  "guardvillagerstaczsupport.configuration.section.guardvillagerstaczsupport.common.toml": "Guard Villagers TACZ Support Configs",
+  "guardvillagerstaczsupport.configuration.section.guardvillagerstaczsupport.common.toml.title": "Guard Villagers TACZ Support Configs",
+  "guardvillagerstaczsupport.configuration.items": "Item List",
+  "guardvillagerstaczsupport.configuration.logDirtBlock": "Log Dirt Block",
+  "guardvillagerstaczsupport.configuration.magicNumberIntroduction": "Magic Number Text",
+  "guardvillagerstaczsupport.configuration.magicNumber": "Magic Number"
+}
