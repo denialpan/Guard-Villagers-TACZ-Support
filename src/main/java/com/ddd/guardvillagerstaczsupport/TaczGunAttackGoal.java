@@ -270,7 +270,7 @@ public class TaczGunAttackGoal extends Goal {
             }
         }
 
-        this.attackTime = 0;
+        this.attackTime = result == ShootResult.SUCCESS ? this.getPostShotDelayTicks(gunStack) : 0;
     }
 
     private boolean isHoldingTaczGun() {
@@ -280,6 +280,24 @@ public class TaczGunAttackGoal extends Goal {
     private boolean isFullAuto(ItemStack gunStack) {
         IGun gun = IGun.getIGunOrNull(gunStack);
         return gun != null && gun.getFireMode(gunStack) == FireMode.AUTO;
+    }
+
+    private int getPostShotDelayTicks(ItemStack gunStack) {
+        if (this.isFullAuto(gunStack)) {
+            return 0;
+        }
+
+        IGun gun = IGun.getIGunOrNull(gunStack);
+        if (gun == null) {
+            return FAILED_ATTACK_RETRY_TICKS;
+        }
+
+        int rpm = gun.getRPM(gunStack);
+        if (rpm <= 0) {
+            return FAILED_ATTACK_RETRY_TICKS;
+        }
+
+        return Math.max(1, (int)Math.ceil(1200.0D / (double)rpm));
     }
 
     private void drawCurrentGun() {
