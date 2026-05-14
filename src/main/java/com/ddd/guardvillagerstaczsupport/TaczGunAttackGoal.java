@@ -80,7 +80,7 @@ public class TaczGunAttackGoal extends Goal {
         if (this.yieldToDefaultNoAmmoBehavior) {
             if (!this.needsAmmoResupply(gunStack)) {
                 this.yieldToDefaultNoAmmoBehavior = false;
-            } else if (this.shouldSeekFoodBeforeAmmo(gunStack)) {
+            } else if (this.shouldSeekFood(gunStack)) {
                 this.yieldToDefaultNoAmmoBehavior = false;
             } else if (this.ammoSearchCooldown > 0) {
                 --this.ammoSearchCooldown;
@@ -92,7 +92,7 @@ public class TaczGunAttackGoal extends Goal {
 
         return this.guard.getTarget() != null
                 || this.needsAmmoResupply(gunStack)
-                || this.shouldSeekFoodBeforeAmmo(gunStack);
+                || this.shouldSeekFood(gunStack);
     }
 
     @Override
@@ -136,7 +136,7 @@ public class TaczGunAttackGoal extends Goal {
             return;
         }
 
-        if (this.shouldSeekFoodBeforeAmmo(gunStack)) {
+        if (this.shouldSeekFood(gunStack)) {
             IGunOperator.fromLivingEntity(this.guard).aim(false);
             if (this.cachedFoodContainerPos != null && this.isCachedFoodContainerUsable()) {
                 this.foodSourcePos = this.cachedFoodContainerPos;
@@ -446,10 +446,10 @@ public class TaczGunAttackGoal extends Goal {
         this.guard.getNavigation().stop();
     }
 
-    private boolean shouldSeekFoodBeforeAmmo(ItemStack gunStack) {
+    private boolean shouldSeekFood(ItemStack gunStack) {
         return this.guard.getHealth() < LOW_HEALTH_FOOD_THRESHOLD
                 && this.guard.getHealth() < this.guard.getMaxHealth()
-                && !this.guardInventoryHasCompatibleAmmo(gunStack);
+                && (this.guard.getTarget() == null || !this.guardInventoryHasCompatibleAmmo(gunStack));
     }
 
     private BlockPos findNearestVanillaFoodContainer() {
