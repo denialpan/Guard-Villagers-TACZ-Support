@@ -31,20 +31,12 @@ import java.util.EnumSet;
 
 public class TaczGunAttackGoal extends Goal {
     private static final int FAILED_ATTACK_RETRY_TICKS = 2;
-    private static final int AMMO_SEARCH_RADIUS = 64;
-    private static final int AMMO_SEARCH_COOLDOWN_TICKS = 100;
-    private static final int FOOD_SEARCH_COOLDOWN_TICKS = 100;
-    private static final int CONTAINER_REACH_TIMEOUT_TICKS = 400;
     private static final int TIMED_OUT_CONTAINER_SKIP_TICKS = 400;
     private static final int GUARD_OFFHAND_INVENTORY_SLOT = 4;
-    private static final float LOW_HEALTH_FOOD_THRESHOLD = 19.0F;
     private static final double AMMO_CONTAINER_REACH_SQR = 4.0D;
-    private static final double FRIENDLY_FIRE_LANE_WIDTH = 2.0D;
     private static final int FRIENDLY_FIRE_REPOSITION_RADIUS = 3;
     private static final int BLOCKED_VIEW_REPOSITION_RADIUS = 5;
     private static final int BLOCKED_VIEW_REPOSITION_ATTEMPTS = 16;
-    private static final double DEFAULT_ATTACK_RANGE = 32.0D;
-    private static final double DEFAULT_ATTACK_RANGE_SQR = DEFAULT_ATTACK_RANGE * DEFAULT_ATTACK_RANGE;
 
     private final Guard guard;
     private int attackTime;
@@ -159,7 +151,7 @@ public class TaczGunAttackGoal extends Goal {
                     this.cachedFoodContainerPos = this.foodSourcePos;
                     this.foodSourceTravelTicks = 0;
                 } else {
-                    this.foodSearchCooldown = FOOD_SEARCH_COOLDOWN_TICKS;
+                    this.foodSearchCooldown = Config.FOOD_SEARCH_COOLDOWN_TICKS.get();
                 }
             }
 
@@ -208,10 +200,11 @@ public class TaczGunAttackGoal extends Goal {
 
         double distanceSqr = this.guard.distanceToSqr(target);
         boolean canSee = this.guard.getSensing().hasLineOfSight(target);
-        boolean readyToFire = canSee && distanceSqr <= DEFAULT_ATTACK_RANGE_SQR;
+        double attackRangeSqr = this.defaultAttackRangeSqr();
+        boolean readyToFire = canSee && distanceSqr <= attackRangeSqr;
         operator.aim(readyToFire);
 
-        if (distanceSqr > DEFAULT_ATTACK_RANGE_SQR * 0.75D) {
+        if (distanceSqr > attackRangeSqr * 0.75D) {
             this.guard.getNavigation().moveTo(target, 0.8D);
         } else {
             this.guard.getNavigation().stop();
@@ -230,7 +223,7 @@ public class TaczGunAttackGoal extends Goal {
             return;
         }
 
-        if (this.attackTime > 0 || distanceSqr > DEFAULT_ATTACK_RANGE_SQR) {
+        if (this.attackTime > 0 || distanceSqr > attackRangeSqr) {
             return;
         }
 
@@ -298,6 +291,15 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         return Math.max(1, (int)Math.ceil(1200.0D / (double)rpm));
+    }
+
+    private double defaultAttackRangeSqr() {
+        double attackRange = Config.DEFAULT_ATTACK_RANGE.get();
+        return attackRange * attackRange;
+    }
+
+    private double friendlyFireWidth() {
+        return Config.FRIENDLY_FIRE_WIDTH.get();
     }
 
     private void drawCurrentGun() {
@@ -436,7 +438,7 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         if (this.ammoSourcePos == null) {
-            this.ammoSearchCooldown = AMMO_SEARCH_COOLDOWN_TICKS;
+            this.ammoSearchCooldown = Config.AMMO_SEARCH_COOLDOWN_TICKS.get();
         }
     }
 
@@ -447,7 +449,7 @@ public class TaczGunAttackGoal extends Goal {
     }
 
     private boolean shouldSeekFood(ItemStack gunStack) {
-        return this.guard.getHealth() < LOW_HEALTH_FOOD_THRESHOLD
+        return this.guard.getHealth() < Config.LOW_FOOD_HEALTH_THRESHOLD.get()
                 && this.guard.getHealth() < this.guard.getMaxHealth()
                 && (this.guard.getTarget() == null || !this.guardInventoryHasCompatibleAmmo(gunStack));
     }
@@ -456,9 +458,10 @@ public class TaczGunAttackGoal extends Goal {
         BlockPos guardPos = this.guard.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
+        int foodSearchRadius = Config.FOOD_SEARCH_RADIUS.get();
 
-        for (BlockPos pos : BlockPos.withinManhattan(guardPos, AMMO_SEARCH_RADIUS, AMMO_SEARCH_RADIUS, AMMO_SEARCH_RADIUS)) {
-            if (pos.distSqr(guardPos) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+        for (BlockPos pos : BlockPos.withinManhattan(guardPos, foodSearchRadius, foodSearchRadius, foodSearchRadius)) {
+            if (pos.distSqr(guardPos) > foodSearchRadius * foodSearchRadius) {
                 continue;
             }
 
@@ -486,7 +489,8 @@ public class TaczGunAttackGoal extends Goal {
     }
 
     private boolean isCachedFoodContainerUsable() {
-        if (this.cachedFoodContainerPos.distSqr(this.guard.blockPosition()) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+        int foodSearchRadius = Config.FOOD_SEARCH_RADIUS.get();
+        if (this.cachedFoodContainerPos.distSqr(this.guard.blockPosition()) > foodSearchRadius * foodSearchRadius) {
             return false;
         }
 
@@ -521,7 +525,7 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         if (this.guard.distanceToSqr(this.foodSourcePos.getX() + 0.5D, this.foodSourcePos.getY() + 0.5D, this.foodSourcePos.getZ() + 0.5D) > AMMO_CONTAINER_REACH_SQR) {
-            if (++this.foodSourceTravelTicks >= CONTAINER_REACH_TIMEOUT_TICKS) {
+            if (++this.foodSourceTravelTicks >= Config.CONTAINER_REACH_TIMEOUT_TICKS.get()) {
                 this.markFoodContainerTimedOut(this.foodSourcePos);
                 return;
             }
@@ -571,9 +575,10 @@ public class TaczGunAttackGoal extends Goal {
         BlockPos guardPos = this.guard.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
+        int ammoSearchRadius = Config.AMMO_SEARCH_RADIUS.get();
 
-        for (BlockPos pos : BlockPos.withinManhattan(guardPos, AMMO_SEARCH_RADIUS, AMMO_SEARCH_RADIUS, AMMO_SEARCH_RADIUS)) {
-            if (pos.distSqr(guardPos) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+        for (BlockPos pos : BlockPos.withinManhattan(guardPos, ammoSearchRadius, ammoSearchRadius, ammoSearchRadius)) {
+            if (pos.distSqr(guardPos) > ammoSearchRadius * ammoSearchRadius) {
                 continue;
             }
 
@@ -601,7 +606,8 @@ public class TaczGunAttackGoal extends Goal {
     }
 
     private boolean isCachedAmmoContainerUsable(ItemStack gunStack) {
-        if (this.cachedAmmoContainerPos.distSqr(this.guard.blockPosition()) > AMMO_SEARCH_RADIUS * AMMO_SEARCH_RADIUS) {
+        int ammoSearchRadius = Config.AMMO_SEARCH_RADIUS.get();
+        if (this.cachedAmmoContainerPos.distSqr(this.guard.blockPosition()) > ammoSearchRadius * ammoSearchRadius) {
             return false;
         }
 
@@ -697,7 +703,7 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         if (this.guard.distanceToSqr(this.ammoSourcePos.getX() + 0.5D, this.ammoSourcePos.getY() + 0.5D, this.ammoSourcePos.getZ() + 0.5D) > AMMO_CONTAINER_REACH_SQR) {
-            if (++this.ammoSourceTravelTicks >= CONTAINER_REACH_TIMEOUT_TICKS) {
+            if (++this.ammoSourceTravelTicks >= Config.CONTAINER_REACH_TIMEOUT_TICKS.get()) {
                 this.markAmmoContainerTimedOut(this.ammoSourcePos);
                 this.tryStartAmmoResupply(gunStack);
                 return;
@@ -860,7 +866,8 @@ public class TaczGunAttackGoal extends Goal {
             return false;
         }
 
-        AABB searchBox = new AABB(start, end).inflate(FRIENDLY_FIRE_LANE_WIDTH);
+        double friendlyFireWidth = this.friendlyFireWidth();
+        AABB searchBox = new AABB(start, end).inflate(friendlyFireWidth);
         for (LivingEntity entity : this.guard.level().getEntitiesOfClass(LivingEntity.class, searchBox)) {
             if (entity == this.guard || entity == target || !entity.isAlive() || entity instanceof Enemy) {
                 continue;
@@ -873,7 +880,7 @@ public class TaczGunAttackGoal extends Goal {
             }
 
             Vec3 closestPoint = start.add(shot.scale(projection));
-            double allowedWidth = FRIENDLY_FIRE_LANE_WIDTH + entity.getBbWidth() * 0.5D;
+            double allowedWidth = friendlyFireWidth + entity.getBbWidth() * 0.5D;
             if (entityCenter.distanceToSqr(closestPoint) <= allowedWidth * allowedWidth) {
                 return true;
             }
@@ -900,7 +907,7 @@ public class TaczGunAttackGoal extends Goal {
             double x = candidate.getX() + 0.5D;
             double y = candidate.getY();
             double z = candidate.getZ() + 0.5D;
-            if (target.distanceToSqr(x, y, z) > DEFAULT_ATTACK_RANGE_SQR) {
+            if (target.distanceToSqr(x, y, z) > this.defaultAttackRangeSqr()) {
                 continue;
             }
 
@@ -941,7 +948,7 @@ public class TaczGunAttackGoal extends Goal {
             double x = candidate.getX() + 0.5D;
             double y = candidate.getY();
             double z = candidate.getZ() + 0.5D;
-            if (target.distanceToSqr(x, y, z) > DEFAULT_ATTACK_RANGE_SQR) {
+            if (target.distanceToSqr(x, y, z) > this.defaultAttackRangeSqr()) {
                 continue;
             }
 
@@ -968,7 +975,8 @@ public class TaczGunAttackGoal extends Goal {
             return false;
         }
 
-        AABB searchBox = new AABB(start, end).inflate(FRIENDLY_FIRE_LANE_WIDTH);
+        double friendlyFireWidth = this.friendlyFireWidth();
+        AABB searchBox = new AABB(start, end).inflate(friendlyFireWidth);
         for (LivingEntity entity : this.guard.level().getEntitiesOfClass(LivingEntity.class, searchBox)) {
             if (entity == this.guard || entity == target || !entity.isAlive() || entity instanceof Enemy) {
                 continue;
@@ -981,7 +989,7 @@ public class TaczGunAttackGoal extends Goal {
             }
 
             Vec3 closestPoint = start.add(shot.scale(projection));
-            double allowedWidth = FRIENDLY_FIRE_LANE_WIDTH + entity.getBbWidth() * 0.5D;
+            double allowedWidth = friendlyFireWidth + entity.getBbWidth() * 0.5D;
             if (entityCenter.distanceToSqr(closestPoint) <= allowedWidth * allowedWidth) {
                 return false;
             }

@@ -6,8 +6,15 @@
   "guardvillagerstaczsupport.configuration.title": "Guard Villagers TACZ Support Configs",
   "guardvillagerstaczsupport.configuration.section.guardvillagerstaczsupport.common.toml": "Guard Villagers TACZ Support Configs",
   "guardvillagerstaczsupport.configuration.section.guardvillagerstaczsupport.common.toml.title": "Guard Villagers TACZ Support Configs",
-  "guardvillagerstaczsupport.configuration.items": "Item List",
-  "guardvillagerstaczsupport.configuration.logDirtBlock": "Log Dirt Block",
-  "guardvillagerstaczsupport.configuration.magicNumberIntroduction": "Magic Number Text",
-  "guardvillagerstaczsupport.configuration.magicNumber": "Magic Number"
+  "guardvillagerstaczsupport.configuration.ammo_search_radius": "ammo search radius",
+  "guardvillagerstaczsupport.configuration.food_search_radius": "food search radius",
+  "guardvillagerstaczsupport.configuration.ammo_search_cooldown_ticks": "ammo search cooldown",
+  "guardvillagerstaczsupport.configuration.food_search_cooldown_ticks": "food search cooldown",
+
+  "guardvillagerstaczsupport.configuration.container_reach_timeout_ticks": "container reach timeout",
+
+  "guardvillagerstaczsupport.configuration.low_food_health_threshold": "health threshold",
+  "guardvillagerstaczsupport.configuration.friendly_fire_width": "friendly fire ray width",
+  "guardvillagerstaczsupport.configuration.default_attack_range": "attack range"
+
 }
