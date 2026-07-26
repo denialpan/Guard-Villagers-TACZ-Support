@@ -5,6 +5,9 @@
   "mixins": [
     "GuardMixin"
   ],
+  "client": [
+    "IllagerModelMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   },
