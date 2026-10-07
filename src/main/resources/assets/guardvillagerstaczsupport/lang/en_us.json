@@ -17,6 +17,8 @@
 
   "guardvillagerstaczsupport.configuration.container_reach_timeout_ticks": "guard container reach timeout",
   "guardvillagerstaczsupport.configuration.container_reach_timeout_ticks.tooltip": "Ticks a guard villager tries to reach a selected food or ammo container before temporarily skipping it.",
+  "guardvillagerstaczsupport.configuration.whitelisted_block_entity_ids": "whitelisted block entity IDs",
+  "guardvillagerstaczsupport.configuration.whitelisted_block_entity_ids.tooltip": "Additional non-vanilla block entity IDs guard villagers may search as containers. Invalid IDs are ignored.",
 
   "guardvillagerstaczsupport.configuration.low_food_health_threshold": "guard food health threshold",
   "guardvillagerstaczsupport.configuration.low_food_health_threshold.tooltip": "Health threshold below which guard villagers search containers for food.",

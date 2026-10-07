@@ -27,6 +27,14 @@ public class Config {
             .comment("Ticks a TACZ guard will try to reach a selected food/ammo container before temporarily skipping it.")
             .defineInRange("container_reach_timeout_ticks", 400, 20, 6000);
 
+    public static final ModConfigSpec.ConfigValue<List<? extends String>> WHITELISTED_BLOCK_ENTITY_IDS = BUILDER
+            .comment("Additional non-vanilla block entity IDs guard villagers may search as containers. Invalid IDs are ignored.")
+            .defineList(List.of("whitelisted_block_entity_ids"),
+                    () -> List.of(),
+                    () -> "minecraft:chest",
+                    entry -> entry instanceof String,
+                    ModConfigSpec.Range.of(0, 256));
+
     public static final ModConfigSpec.DoubleValue LOW_FOOD_HEALTH_THRESHOLD = BUILDER
             .comment("Health threshold below which TACZ guards search containers for food.")
             .defineInRange("low_food_health_threshold", 18.0D, 1.0D, 19.0D);

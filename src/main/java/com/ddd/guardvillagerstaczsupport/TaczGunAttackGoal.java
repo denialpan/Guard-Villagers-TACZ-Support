@@ -11,6 +11,7 @@ import com.tacz.guns.api.item.gun.FireMode;
 import com.tacz.guns.resource.CommonAssetsManager;
 import com.tacz.guns.resource.index.CommonGunIndex;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
@@ -28,8 +29,11 @@ import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.items.IItemHandler;
 import tallestegg.guardvillagers.common.entities.Guard;
 
+import java.lang.reflect.Method;
 import java.util.EnumSet;
 
 public class TaczGunAttackGoal extends Goal {
@@ -509,11 +513,7 @@ public class TaczGunAttackGoal extends Goal {
             }
 
             BlockEntity blockEntity = this.guard.level().getBlockEntity(pos);
-            if (!(blockEntity instanceof Container container) || !this.isVanillaBlockEntity(blockEntity)) {
-                continue;
-            }
-
-            if (!this.containerHasFood(container)) {
+            if (!this.blockEntityHasFood(blockEntity, pos)) {
                 continue;
             }
 
@@ -538,10 +538,21 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedFoodContainerPos);
-        return blockEntity instanceof Container container
-                && this.isVanillaBlockEntity(blockEntity)
-                && this.containerHasFood(container)
+        return this.blockEntityHasFood(blockEntity, this.cachedFoodContainerPos)
                 && !this.isTimedOutFoodContainer(this.cachedFoodContainerPos);
+    }
+
+    private boolean blockEntityHasFood(BlockEntity blockEntity, BlockPos pos) {
+        if (!this.isSearchableStorageBlockEntity(blockEntity, pos)) {
+            return false;
+        }
+
+        if (blockEntity instanceof Container container && this.containerHasFood(container)) {
+            return true;
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        return itemHandler != null && this.itemHandlerHasFood(itemHandler);
     }
 
     private boolean containerHasFood(Container container) {
@@ -554,11 +565,19 @@ public class TaczGunAttackGoal extends Goal {
         return false;
     }
 
+    private boolean itemHandlerHasFood(IItemHandler itemHandler) {
+        for (int slot = 0; slot < itemHandler.getSlots(); ++slot) {
+            if (this.isFood(itemHandler.getStackInSlot(slot))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void tickFoodResupply() {
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.foodSourcePos);
-        if (!(blockEntity instanceof Container container)
-                || !this.isVanillaBlockEntity(blockEntity)
-                || !this.containerHasFood(container)) {
+        if (!this.blockEntityHasFood(blockEntity, this.foodSourcePos)) {
             if (this.foodSourcePos.equals(this.cachedFoodContainerPos)) {
                 this.cachedFoodContainerPos = null;
             }
@@ -579,13 +598,25 @@ public class TaczGunAttackGoal extends Goal {
 
         this.foodSourceTravelTicks = 0;
         this.guard.getNavigation().stop();
-        this.consumeOneFoodFromContainer(container);
-        if (this.containerHasFood(container)) {
+        this.consumeOneFoodFromBlockEntity(blockEntity, this.foodSourcePos);
+        if (this.blockEntityHasFood(blockEntity, this.foodSourcePos)) {
             this.cachedFoodContainerPos = this.foodSourcePos;
         } else if (this.foodSourcePos.equals(this.cachedFoodContainerPos)) {
             this.cachedFoodContainerPos = null;
         }
         this.foodSourcePos = null;
+    }
+
+    private void consumeOneFoodFromBlockEntity(BlockEntity blockEntity, BlockPos pos) {
+        if (blockEntity instanceof Container container && this.containerHasFood(container)) {
+            this.consumeOneFoodFromContainer(container);
+            return;
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        if (itemHandler != null) {
+            this.consumeOneFoodFromItemHandler(blockEntity, itemHandler);
+        }
     }
 
     private void consumeOneFoodFromContainer(Container container) {
@@ -610,6 +641,35 @@ public class TaczGunAttackGoal extends Goal {
         }
     }
 
+    private void consumeOneFoodFromItemHandler(BlockEntity blockEntity, IItemHandler itemHandler) {
+        for (int slot = 0; slot < itemHandler.getSlots(); ++slot) {
+            ItemStack stack = itemHandler.getStackInSlot(slot);
+            if (!this.isFood(stack)) {
+                continue;
+            }
+
+            ItemStack food = itemHandler.extractItem(slot, 1, false);
+            if (food.isEmpty()) {
+                continue;
+            }
+
+            FoodProperties foodProperties = food.getFoodProperties(this.guard);
+            float nutrition = foodProperties != null ? (float)foodProperties.nutrition() : 1.0F;
+            this.guard.heal(2.0F * nutrition);
+            this.guard.gameEvent(GameEvent.EAT);
+
+            if (foodProperties != null && foodProperties.usingConvertsTo().isPresent()) {
+                ItemStack leftover = this.returnToItemHandler(itemHandler, slot, foodProperties.usingConvertsTo().get().copy());
+                if (!leftover.isEmpty()) {
+                    this.dropStack(leftover);
+                }
+            }
+
+            blockEntity.setChanged();
+            return;
+        }
+    }
+
     private boolean isFood(ItemStack stack) {
         return !stack.isEmpty() && stack.getFoodProperties(this.guard) != null;
     }
@@ -626,11 +686,7 @@ public class TaczGunAttackGoal extends Goal {
             }
 
             BlockEntity blockEntity = this.guard.level().getBlockEntity(pos);
-            if (!(blockEntity instanceof Container container) || !this.isVanillaBlockEntity(blockEntity)) {
-                continue;
-            }
-
-            if (!this.containerHasCompatibleAmmo(container, gunStack)) {
+            if (!this.blockEntityHasCompatibleAmmo(blockEntity, pos, gunStack)) {
                 continue;
             }
 
@@ -655,9 +711,7 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.cachedAmmoContainerPos);
-        return blockEntity instanceof Container container
-                && this.isVanillaBlockEntity(blockEntity)
-                && this.containerHasCompatibleAmmo(container, gunStack)
+        return this.blockEntityHasCompatibleAmmo(blockEntity, this.cachedAmmoContainerPos, gunStack)
                 && !this.isTimedOutAmmoContainer(this.cachedAmmoContainerPos);
     }
 
@@ -705,9 +759,88 @@ public class TaczGunAttackGoal extends Goal {
         }
     }
 
-    private boolean isVanillaBlockEntity(BlockEntity blockEntity) {
+    private boolean isSearchableBlockEntity(BlockEntity blockEntity) {
+        if (blockEntity == null) {
+            return false;
+        }
+
         ResourceLocation id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
-        return id != null && "minecraft".equals(id.getNamespace());
+        if (id == null) {
+            return false;
+        }
+
+        if ("minecraft".equals(id.getNamespace())) {
+            return true;
+        }
+
+        if ("sophisticatedstorage".equals(id.getNamespace())) {
+            return true;
+        }
+
+        return this.isWhitelistedBlockEntityId(id);
+    }
+
+    private boolean isWhitelistedBlockEntityId(ResourceLocation blockEntityId) {
+        for (String entry : Config.WHITELISTED_BLOCK_ENTITY_IDS.get()) {
+            ResourceLocation whitelistedId;
+            try {
+                whitelistedId = ResourceLocation.parse(entry);
+            } catch (Exception ignored) {
+                continue;
+            }
+
+            if (blockEntityId.equals(whitelistedId)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isSearchableStorageBlockEntity(BlockEntity blockEntity, BlockPos pos) {
+        return this.isSearchableBlockEntity(blockEntity)
+                && (blockEntity instanceof Container || this.getItemHandler(blockEntity, pos) != null);
+    }
+
+    private IItemHandler getItemHandler(BlockEntity blockEntity, BlockPos pos) {
+        if (blockEntity == null) {
+            return null;
+        }
+
+        IItemHandler itemHandler = this.guard.level().getCapability(
+                Capabilities.ItemHandler.BLOCK,
+                pos,
+                this.guard.level().getBlockState(pos),
+                blockEntity,
+                (Direction)null);
+        if (itemHandler != null) {
+            return itemHandler;
+        }
+
+        return this.getSophisticatedStorageItemHandler(blockEntity);
+    }
+
+    private IItemHandler getSophisticatedStorageItemHandler(BlockEntity blockEntity) {
+        try {
+            Method method = blockEntity.getClass().getMethod("getExternalItemHandler", Direction.class);
+            Object itemHandler = method.invoke(blockEntity, new Object[] { null });
+            return itemHandler instanceof IItemHandler handler ? handler : null;
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return null;
+        }
+    }
+
+    private boolean blockEntityHasCompatibleAmmo(BlockEntity blockEntity, BlockPos pos, ItemStack gunStack) {
+        if (!this.isSearchableStorageBlockEntity(blockEntity, pos)) {
+            return false;
+        }
+
+        if (blockEntity instanceof Container container && this.containerHasCompatibleAmmo(container, gunStack)) {
+            return true;
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        return itemHandler != null && this.itemHandlerHasCompatibleAmmo(itemHandler, gunStack);
     }
 
     private boolean containerHasCompatibleAmmo(Container container, ItemStack gunStack) {
@@ -749,7 +882,7 @@ public class TaczGunAttackGoal extends Goal {
         this.guard.guardInventory.setItem(GUARD_OFFHAND_INVENTORY_SLOT, ItemStack.EMPTY);
         this.guard.guardInventory.setChanged();
 
-        ItemStack leftover = this.storeStackInNearbyVanillaContainer(stackToStore);
+        ItemStack leftover = this.storeStackInNearbyContainer(stackToStore);
         if (!leftover.isEmpty()) {
             this.dropStack(leftover);
         }
@@ -775,7 +908,7 @@ public class TaczGunAttackGoal extends Goal {
                 && (ammoBox.isCreative(ammoStack) || ammoBox.isAllTypeCreative(ammoStack) || ammoBox.getAmmoCount(ammoStack) > 0);
     }
 
-    private ItemStack storeStackInNearbyVanillaContainer(ItemStack stack) {
+    private ItemStack storeStackInNearbyContainer(ItemStack stack) {
         ItemStack remaining = stack.copy();
         BlockPos guardPos = this.guard.blockPosition();
         int ammoSearchRadius = Config.AMMO_SEARCH_RADIUS.get();
@@ -790,7 +923,7 @@ public class TaczGunAttackGoal extends Goal {
                 }
 
                 BlockEntity blockEntity = this.guard.level().getBlockEntity(pos);
-                if (!(blockEntity instanceof Container container) || !this.isVanillaBlockEntity(blockEntity) || !this.containerCanAccept(container, remaining)) {
+                if (!this.blockEntityCanAccept(blockEntity, pos, remaining)) {
                     continue;
                 }
 
@@ -806,19 +939,32 @@ public class TaczGunAttackGoal extends Goal {
             }
 
             BlockEntity blockEntity = this.guard.level().getBlockEntity(nearest);
-            if (!(blockEntity instanceof Container container)) {
+            if (!this.isSearchableStorageBlockEntity(blockEntity, nearest)) {
                 return remaining;
             }
 
             int previousCount = remaining.getCount();
-            remaining = this.insertStackIntoContainer(container, remaining);
-            container.setChanged();
+            remaining = this.insertStackIntoBlockEntity(blockEntity, nearest, remaining);
+            blockEntity.setChanged();
             if (remaining.getCount() >= previousCount) {
                 return remaining;
             }
         }
 
         return remaining;
+    }
+
+    private boolean blockEntityCanAccept(BlockEntity blockEntity, BlockPos pos, ItemStack stack) {
+        if (!this.isSearchableStorageBlockEntity(blockEntity, pos)) {
+            return false;
+        }
+
+        if (blockEntity instanceof Container container && this.containerCanAccept(container, stack)) {
+            return true;
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        return itemHandler != null && this.itemHandlerCanAccept(itemHandler, stack);
     }
 
     private boolean containerCanAccept(Container container, ItemStack stack) {
@@ -834,6 +980,46 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         return false;
+    }
+
+    private boolean itemHandlerHasCompatibleAmmo(IItemHandler itemHandler, ItemStack gunStack) {
+        for (int slot = 0; slot < itemHandler.getSlots(); ++slot) {
+            ItemStack stack = itemHandler.getStackInSlot(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+
+            IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
+            if (ammo != null && ammo.isAmmoOfGun(gunStack, stack)) {
+                return true;
+            }
+
+            IAmmoBox ammoBox = stack.getItem() instanceof IAmmoBox box ? box : null;
+            if (ammoBox != null && ammoBox.isAmmoBoxOfGun(gunStack, stack)
+                    && (ammoBox.isCreative(stack) || ammoBox.isAllTypeCreative(stack) || ammoBox.getAmmoCount(stack) > 0)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean itemHandlerCanAccept(IItemHandler itemHandler, ItemStack stack) {
+        ItemStack remaining = stack.copy();
+        for (int slot = 0; slot < itemHandler.getSlots() && !remaining.isEmpty(); ++slot) {
+            remaining = itemHandler.insertItem(slot, remaining, true);
+        }
+
+        return remaining.getCount() < stack.getCount();
+    }
+
+    private ItemStack insertStackIntoBlockEntity(BlockEntity blockEntity, BlockPos pos, ItemStack stack) {
+        if (blockEntity instanceof Container container) {
+            return this.insertStackIntoContainer(container, stack);
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        return itemHandler != null ? this.insertStackIntoItemHandler(itemHandler, stack) : stack;
     }
 
     private ItemStack insertStackIntoContainer(Container container, ItemStack stack) {
@@ -864,6 +1050,15 @@ public class TaczGunAttackGoal extends Goal {
         return remaining;
     }
 
+    private ItemStack insertStackIntoItemHandler(IItemHandler itemHandler, ItemStack stack) {
+        ItemStack remaining = stack.copy();
+        for (int slot = 0; slot < itemHandler.getSlots() && !remaining.isEmpty(); ++slot) {
+            remaining = itemHandler.insertItem(slot, remaining, false);
+        }
+
+        return remaining;
+    }
+
     private void dropStack(ItemStack stack) {
         if (stack.isEmpty()) {
             return;
@@ -879,9 +1074,7 @@ public class TaczGunAttackGoal extends Goal {
 
     private void tickAmmoResupply(ItemStack gunStack) {
         BlockEntity blockEntity = this.guard.level().getBlockEntity(this.ammoSourcePos);
-        if (!(blockEntity instanceof Container container)
-                || !this.isVanillaBlockEntity(blockEntity)
-                || !this.containerHasCompatibleAmmo(container, gunStack)) {
+        if (!this.blockEntityHasCompatibleAmmo(blockEntity, this.ammoSourcePos, gunStack)) {
             if (this.ammoSourcePos.equals(this.cachedAmmoContainerPos)) {
                 this.cachedAmmoContainerPos = null;
             }
@@ -903,13 +1096,25 @@ public class TaczGunAttackGoal extends Goal {
 
         this.ammoSourceTravelTicks = 0;
         this.guard.getNavigation().stop();
-        this.extractMaxCompatibleAmmo(container, gunStack);
-        if (this.containerHasCompatibleAmmo(container, gunStack)) {
+        this.extractMaxCompatibleAmmo(blockEntity, this.ammoSourcePos, gunStack);
+        if (this.blockEntityHasCompatibleAmmo(blockEntity, this.ammoSourcePos, gunStack)) {
             this.cachedAmmoContainerPos = this.ammoSourcePos;
         } else if (this.ammoSourcePos.equals(this.cachedAmmoContainerPos)) {
             this.cachedAmmoContainerPos = null;
         }
         this.ammoSourcePos = null;
+    }
+
+    private void extractMaxCompatibleAmmo(BlockEntity blockEntity, BlockPos pos, ItemStack gunStack) {
+        if (blockEntity instanceof Container container) {
+            this.extractMaxCompatibleAmmo(container, gunStack);
+            return;
+        }
+
+        IItemHandler itemHandler = this.getItemHandler(blockEntity, pos);
+        if (itemHandler != null) {
+            this.extractMaxCompatibleAmmo(blockEntity, itemHandler, gunStack);
+        }
     }
 
     private void extractMaxCompatibleAmmo(Container container, ItemStack gunStack) {
@@ -923,10 +1128,32 @@ public class TaczGunAttackGoal extends Goal {
         container.setChanged();
     }
 
+    private void extractMaxCompatibleAmmo(BlockEntity blockEntity, IItemHandler itemHandler, ItemStack gunStack) {
+        int looseAmmoCount = this.countLooseCompatibleAmmo(itemHandler, gunStack);
+        if (looseAmmoCount > 0) {
+            this.extractLooseCompatibleAmmo(itemHandler, gunStack, looseAmmoCount);
+        }
+
+        this.extractMaxAmmoBoxRounds(blockEntity, itemHandler, gunStack);
+        blockEntity.setChanged();
+    }
+
     private int countLooseCompatibleAmmo(Container container, ItemStack gunStack) {
         int count = 0;
         for (int slot = 0; slot < container.getContainerSize(); ++slot) {
             ItemStack stack = container.getItem(slot);
+            IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
+            if (ammo != null && ammo.isAmmoOfGun(gunStack, stack)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private int countLooseCompatibleAmmo(IItemHandler itemHandler, ItemStack gunStack) {
+        int count = 0;
+        for (int slot = 0; slot < itemHandler.getSlots(); ++slot) {
+            ItemStack stack = itemHandler.getStackInSlot(slot);
             IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
             if (ammo != null && ammo.isAmmoOfGun(gunStack, stack)) {
                 count += stack.getCount();
@@ -952,6 +1179,34 @@ public class TaczGunAttackGoal extends Goal {
                 remaining = 0;
             } else {
                 remaining -= count;
+            }
+        }
+    }
+
+    private void extractLooseCompatibleAmmo(IItemHandler itemHandler, ItemStack gunStack, int amountToTake) {
+        int remaining = amountToTake;
+        for (int slot = 0; slot < itemHandler.getSlots() && remaining > 0; ++slot) {
+            ItemStack stack = itemHandler.getStackInSlot(slot);
+            IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
+            if (ammo == null || !ammo.isAmmoOfGun(gunStack, stack)) {
+                continue;
+            }
+
+            int count = Math.min(remaining, stack.getCount());
+            ItemStack extracted = itemHandler.extractItem(slot, count, false);
+            if (extracted.isEmpty()) {
+                continue;
+            }
+
+            ItemStack leftover = this.insertIntoGuardInventory(extracted);
+            if (!leftover.isEmpty()) {
+                leftover = this.returnToItemHandler(itemHandler, slot, leftover);
+                if (!leftover.isEmpty()) {
+                    this.dropStack(leftover);
+                }
+                remaining = 0;
+            } else {
+                remaining -= extracted.getCount();
             }
         }
     }
@@ -987,6 +1242,53 @@ public class TaczGunAttackGoal extends Goal {
                     ammoBox.setAmmoId(stack, DefaultAssets.EMPTY_AMMO_ID);
                 }
             }
+        }
+    }
+
+    private void extractMaxAmmoBoxRounds(BlockEntity blockEntity, IItemHandler itemHandler, ItemStack gunStack) {
+        for (int slot = 0; slot < itemHandler.getSlots(); ++slot) {
+            ItemStack stack = itemHandler.getStackInSlot(slot);
+            IAmmoBox ammoBox = stack.getItem() instanceof IAmmoBox box ? box : null;
+            if (ammoBox == null || !ammoBox.isAmmoBoxOfGun(gunStack, stack)) {
+                continue;
+            }
+
+            if (ammoBox.isCreative(stack) || ammoBox.isAllTypeCreative(stack)) {
+                this.insertIntoGuardInventory(stack.copyWithCount(1));
+                continue;
+            }
+
+            int amountToTake = ammoBox.getAmmoCount(stack);
+            if (amountToTake <= 0) {
+                continue;
+            }
+
+            ItemStack extractedBox = itemHandler.extractItem(slot, 1, false);
+            IAmmoBox extractedAmmoBox = extractedBox.getItem() instanceof IAmmoBox box ? box : null;
+            if (extractedAmmoBox == null) {
+                continue;
+            }
+
+            ItemStack extractedAmmo = AmmoItemBuilder.create()
+                    .setId(extractedAmmoBox.getAmmoId(extractedBox))
+                    .setCount(extractedAmmoBox.getAmmoCount(extractedBox))
+                    .build();
+            ItemStack leftover = this.insertIntoGuardInventory(extractedAmmo);
+            int inserted = extractedAmmo.getCount() - leftover.getCount();
+
+            if (inserted > 0) {
+                int remainingAmmo = extractedAmmoBox.getAmmoCount(extractedBox) - inserted;
+                extractedAmmoBox.setAmmoCount(extractedBox, remainingAmmo);
+                if (remainingAmmo <= 0) {
+                    extractedAmmoBox.setAmmoId(extractedBox, DefaultAssets.EMPTY_AMMO_ID);
+                }
+            }
+
+            ItemStack boxLeftover = this.returnToItemHandler(itemHandler, slot, extractedBox);
+            if (!boxLeftover.isEmpty()) {
+                this.dropStack(boxLeftover);
+            }
+            blockEntity.setChanged();
         }
     }
 
@@ -1043,6 +1345,23 @@ public class TaczGunAttackGoal extends Goal {
                 return;
             }
         }
+    }
+
+    private ItemStack returnToItemHandler(IItemHandler itemHandler, int preferredSlot, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return stack;
+        }
+
+        ItemStack remaining = itemHandler.insertItem(preferredSlot, stack, false);
+        for (int slot = 0; slot < itemHandler.getSlots() && !remaining.isEmpty(); ++slot) {
+            if (slot == preferredSlot) {
+                continue;
+            }
+
+            remaining = itemHandler.insertItem(slot, remaining, false);
+        }
+
+        return remaining;
     }
 
     private boolean hasPassiveEntityInLineOfFire(LivingEntity target) {
