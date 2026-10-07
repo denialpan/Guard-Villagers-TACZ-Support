@@ -43,6 +43,8 @@
   "guardvillagerstaczsupport.configuration.zombie_tacz_inaccuracy_degrees": "zombie inaccuracy degrees",
   "guardvillagerstaczsupport.configuration.zombie_tacz_inaccuracy_degrees.tooltip": "Maximum random yaw and pitch offset in degrees applied when armed zombies fire.",
 
+  "guardvillagerstaczsupport.configuration.pillager_tacz_enabled": "pillager behavior enabled",
+  "guardvillagerstaczsupport.configuration.pillager_tacz_enabled.tooltip": "Enables custom pillager behavior, including weapon spawning, firing AI, and custom drops.",
   "guardvillagerstaczsupport.configuration.pillager_tacz_weapon_spawn_chance": "pillager weapon spawn chance",
   "guardvillagerstaczsupport.configuration.pillager_tacz_weapon_spawn_chance.tooltip": "Chance for a newly spawned vanilla pillager to receive a weapon from pillager_tacz_weapon_ids.",
   "guardvillagerstaczsupport.configuration.pillager_tacz_weapon_ids": "pillager TACZ weapon IDs",

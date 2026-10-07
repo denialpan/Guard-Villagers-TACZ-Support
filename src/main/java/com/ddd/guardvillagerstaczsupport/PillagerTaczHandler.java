@@ -21,6 +21,10 @@ import java.util.List;
 public class PillagerTaczHandler {
     @SubscribeEvent
     public void onEntityJoinLevel(EntityJoinLevelEvent event) {
+        if (!Config.PILLAGER_TACZ_ENABLED.get()) {
+            return;
+        }
+
         if (event.getLevel().isClientSide() || event.getEntity().getType() != EntityType.PILLAGER || !(event.getEntity() instanceof Pillager pillager)) {
             return;
         }
@@ -42,6 +46,10 @@ public class PillagerTaczHandler {
 
     @SubscribeEvent
     public void onLivingDrops(LivingDropsEvent event) {
+        if (!Config.PILLAGER_TACZ_ENABLED.get()) {
+            return;
+        }
+
         if (event.getEntity().level().isClientSide() || event.getEntity().getType() != EntityType.PILLAGER || !(event.getEntity() instanceof Pillager pillager)) {
             return;
         }

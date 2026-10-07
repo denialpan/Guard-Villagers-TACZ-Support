@@ -75,6 +75,10 @@ public class Config {
             .comment("Maximum random yaw/pitch offset in degrees applied when TACZ-armed zombies fire.")
             .defineInRange("zombie_tacz_inaccuracy_degrees", 8.0D, 0.0D, 45.0D);
 
+    public static final ModConfigSpec.BooleanValue PILLAGER_TACZ_ENABLED = BUILDER
+            .comment("Enables custom TACZ pillager behavior, including TACZ weapon spawning, firing AI, and custom drops.")
+            .define("pillager_tacz_enabled", true);
+
     public static final ModConfigSpec.DoubleValue PILLAGER_TACZ_WEAPON_SPAWN_CHANCE = BUILDER
             .comment("Chance for a newly spawned vanilla pillager to receive a TACZ weapon from pillager_tacz_weapon_ids.")
             .defineInRange("pillager_tacz_weapon_spawn_chance", 0.05D, 0.0D, 1.0D);
