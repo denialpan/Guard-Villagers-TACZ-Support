@@ -8,6 +8,8 @@ import com.tacz.guns.api.item.IAmmoBox;
 import com.tacz.guns.api.item.IGun;
 import com.tacz.guns.api.item.builder.AmmoItemBuilder;
 import com.tacz.guns.api.item.gun.FireMode;
+import com.tacz.guns.resource.CommonAssetsManager;
+import com.tacz.guns.resource.index.CommonGunIndex;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -46,7 +48,6 @@ public class TaczGunAttackGoal extends Goal {
     private int foodSourceTravelTicks;
     private int timedOutAmmoContainerSkipTicks;
     private int timedOutFoodContainerSkipTicks;
-    private boolean stagedGuardInventoryRound;
     private boolean yieldToDefaultNoAmmoBehavior;
     private BlockPos ammoSourcePos;
     private BlockPos cachedAmmoContainerPos;
@@ -102,7 +103,6 @@ public class TaczGunAttackGoal extends Goal {
     @Override
     public void start() {
         this.attackTime = 0;
-        this.stagedGuardInventoryRound = false;
         this.drawCurrentGun();
     }
 
@@ -114,7 +114,6 @@ public class TaczGunAttackGoal extends Goal {
         this.ammoSourceTravelTicks = 0;
         this.foodSourceTravelTicks = 0;
         this.foodSearchCooldown = 0;
-        this.stagedGuardInventoryRound = false;
         IGunOperator.fromLivingEntity(this.guard).aim(false);
     }
 
@@ -250,7 +249,6 @@ public class TaczGunAttackGoal extends Goal {
         }
 
         ShootResult result = operator.shoot(this.guard::getXRot, this.guard::getYRot);
-        this.finishStagedGuardInventoryRound(gunStack, result);
         if (result == ShootResult.NOT_DRAW || result == ShootResult.IS_DRAWING) {
             this.drawCurrentGun();
         } else if (result == ShootResult.NEED_BOLT) {
@@ -349,29 +347,40 @@ public class TaczGunAttackGoal extends Goal {
             return true;
         }
 
-        if (!this.consumeOneCompatibleAmmo(gunStack)) {
+        int ammoToLoad = this.getReloadAmount(gun, gunStack);
+        int consumedAmmo = this.consumeCompatibleAmmo(gunStack, ammoToLoad);
+        if (consumedAmmo <= 0) {
             return false;
         }
 
-        this.stagedGuardInventoryRound = true;
-        gun.setCurrentAmmoCount(gunStack, 1);
+        gun.setCurrentAmmoCount(gunStack, consumedAmmo);
         gun.setBulletInBarrel(gunStack, true);
         return true;
     }
 
-    private boolean hasLoadedAmmo(IGun gun, ItemStack gunStack) {
-        return gun.hasBulletInBarrel(gunStack) || gun.getCurrentAmmoCount(gunStack) > 0;
+    private int getReloadAmount(IGun gun, ItemStack gunStack) {
+        int magazineSize = this.getMagazineSize(gun, gunStack);
+        int currentAmmo = Math.max(0, gun.getCurrentAmmoCount(gunStack));
+        int reloadAmount = magazineSize - currentAmmo;
+        return Math.max(1, reloadAmount);
     }
 
-    private void finishStagedGuardInventoryRound(ItemStack gunStack, ShootResult result) {
-        if (!this.stagedGuardInventoryRound) {
-            return;
+    private int getMagazineSize(IGun gun, ItemStack gunStack) {
+        try {
+            ResourceLocation gunId = gun.getGunId(gunStack);
+            CommonGunIndex gunIndex = gunId != null ? CommonAssetsManager.get().getGunIndex(gunId) : null;
+            if (gunIndex != null && gunIndex.getGunData() != null && gunIndex.getGunData().getAmmoAmount() > 0) {
+                return gunIndex.getGunData().getAmmoAmount();
+            }
+        } catch (Exception exception) {
+            GuardVillagersTACZSupport.LOGGER.warn("Could not resolve TACZ magazine size for guard weapon", exception);
         }
 
-        if (result == ShootResult.SUCCESS || result == ShootResult.NO_AMMO) {
-            this.stagedGuardInventoryRound = false;
-            this.clearLoadedAmmoState(gunStack);
-        }
+        return 1;
+    }
+
+    private boolean hasLoadedAmmo(IGun gun, ItemStack gunStack) {
+        return gun.hasBulletInBarrel(gunStack) || gun.getCurrentAmmoCount(gunStack) > 0;
     }
 
     private void clearLoadedAmmoState(ItemStack gunStack) {
@@ -382,36 +391,56 @@ public class TaczGunAttackGoal extends Goal {
         }
     }
 
-    private boolean consumeOneCompatibleAmmo(ItemStack gunStack) {
-        for (int slot = 0; slot < this.guard.guardInventory.getContainerSize(); ++slot) {
-            ItemStack stack = this.guard.guardInventory.getItem(slot);
-            if (stack.isEmpty()) {
+    private int consumeCompatibleAmmo(ItemStack gunStack, int amountToConsume) {
+        int remaining = amountToConsume;
+        remaining = this.consumeCompatibleAmmoFromSlot(gunStack, GUARD_OFFHAND_INVENTORY_SLOT, remaining);
+        for (int slot = 0; slot < this.guard.guardInventory.getContainerSize() && remaining > 0; ++slot) {
+            if (slot == GUARD_OFFHAND_INVENTORY_SLOT) {
                 continue;
             }
 
-            IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
-            if (ammo != null && ammo.isAmmoOfGun(gunStack, stack)) {
-                this.guard.guardInventory.removeItem(slot, 1);
-                this.guard.guardInventory.setChanged();
-                return true;
-            }
-
-            IAmmoBox ammoBox = stack.getItem() instanceof IAmmoBox box ? box : null;
-            if (ammoBox != null && ammoBox.isAmmoBoxOfGun(gunStack, stack)
-                    && (ammoBox.isCreative(stack) || ammoBox.isAllTypeCreative(stack) || ammoBox.getAmmoCount(stack) > 0)) {
-                if (!ammoBox.isCreative(stack) && !ammoBox.isAllTypeCreative(stack)) {
-                    int remainingAmmo = ammoBox.getAmmoCount(stack) - 1;
-                    ammoBox.setAmmoCount(stack, remainingAmmo);
-                    if (remainingAmmo <= 0) {
-                        ammoBox.setAmmoId(stack, DefaultAssets.EMPTY_AMMO_ID);
-                    }
-                    this.guard.guardInventory.setChanged();
-                }
-                return true;
-            }
+            remaining = this.consumeCompatibleAmmoFromSlot(gunStack, slot, remaining);
         }
 
-        return false;
+        return amountToConsume - remaining;
+    }
+
+    private int consumeCompatibleAmmoFromSlot(ItemStack gunStack, int slot, int remaining) {
+        if (remaining <= 0 || slot < 0 || slot >= this.guard.guardInventory.getContainerSize()) {
+            return remaining;
+        }
+
+        ItemStack stack = this.guard.guardInventory.getItem(slot);
+        if (stack.isEmpty()) {
+            return remaining;
+        }
+
+        IAmmo ammo = IAmmo.getIAmmoOrNull(stack);
+        if (ammo != null && ammo.isAmmoOfGun(gunStack, stack)) {
+            int consumed = Math.min(remaining, stack.getCount());
+            this.guard.guardInventory.removeItem(slot, consumed);
+            this.guard.guardInventory.setChanged();
+            return remaining - consumed;
+        }
+
+        IAmmoBox ammoBox = stack.getItem() instanceof IAmmoBox box ? box : null;
+        if (ammoBox != null && ammoBox.isAmmoBoxOfGun(gunStack, stack)
+                && (ammoBox.isCreative(stack) || ammoBox.isAllTypeCreative(stack) || ammoBox.getAmmoCount(stack) > 0)) {
+            if (ammoBox.isCreative(stack) || ammoBox.isAllTypeCreative(stack)) {
+                return 0;
+            }
+
+            int consumed = Math.min(remaining, ammoBox.getAmmoCount(stack));
+            int remainingAmmo = ammoBox.getAmmoCount(stack) - consumed;
+            ammoBox.setAmmoCount(stack, remainingAmmo);
+            if (remainingAmmo <= 0) {
+                ammoBox.setAmmoId(stack, DefaultAssets.EMPTY_AMMO_ID);
+            }
+            this.guard.guardInventory.setChanged();
+            return remaining - consumed;
+        }
+
+        return remaining;
     }
 
     private void tryStartAmmoResupply(ItemStack gunStack) {
